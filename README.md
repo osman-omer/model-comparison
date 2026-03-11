@@ -1,4 +1,4 @@
-# Project 8 — Model Comparison & Final Report
+# Project 3 — Model Comparison & Final Report
 
 ## 📌 Project Goal
 
