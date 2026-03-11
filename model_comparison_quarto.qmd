@@ -1,0 +1,382 @@
+---
+title: "Model Comparison & Final Report"
+subtitle: "Comprehensive Analysis of Regression Portfolio"
+author: "Osman Omer Mustafa"
+date: "today"
+format:
+  html:
+    toc: true
+    code-fold: true
+    theme: cosmo
+    toc-location: left
+execute:
+  warning: false
+  message: false
+---
+
+## Executive Summary
+
+This report compares all regression models developed across Projects 1-7.
+
+**Datasets:**
+
+- Insurance (n=1338): Predicting medical charges
+- Heart Disease (n=1025): Predicting disease presence
+
+**Key Findings:**
+
+- Linear: Multiple regression best (R² = 0.75)
+- Logistic: Full model best (AUC = 0.95)
+- Regularization: Similar performance (AUC ≈ 0.92)
+
+## Load Libraries
+
+```{r setup}
+library(tidyverse)
+library(broom)
+library(pROC)
+library(caret)
+library(glmnet)
+```
+
+## Part 1: Linear Regression Models
+
+### Data Preparation
+
+```{r}
+insurance <- read_csv("insurance.csv")
+
+insurance <- insurance %>%
+  mutate(
+    sex = as.factor(sex),
+    smoker = as.factor(smoker),
+    region = as.factor(region)
+  )
+```
+
+### Model 1: Simple Linear
+
+Predicting charges from age only.
+
+```{r}
+model_simple <- lm(charges ~ age, data = insurance)
+glance_simple <- glance(model_simple)
+```
+
+### Model 2: Multiple Linear
+
+Including age, BMI, smoker status, and region.
+
+```{r}
+model_multiple <- lm(charges ~ age + bmi + smoker + region, data = insurance)
+glance_multiple <- glance(model_multiple)
+```
+
+### Model 3: Polynomial
+
+Adding quadratic terms for age and BMI.
+
+```{r}
+model_poly <- lm(charges ~ age + I(age^2) + bmi + I(bmi^2), data = insurance)
+glance_poly <- glance(model_poly)
+```
+
+### Linear Models Comparison
+
+```{r}
+linear_comparison <- data.frame(
+  Model = c("Simple", "Multiple", "Polynomial"),
+  R_squared = c(glance_simple$r.squared, glance_multiple$r.squared, glance_poly$r.squared),
+  Adj_R_squared = c(glance_simple$adj.r.squared, glance_multiple$adj.r.squared, glance_poly$adj.r.squared),
+  AIC = c(AIC(model_simple), AIC(model_multiple), AIC(model_poly)),
+  BIC = c(BIC(model_simple), BIC(model_multiple), BIC(model_poly))
+)
+
+linear_comparison %>% knitr::kable(caption = "Linear Models Performance", digits = 3)
+```
+
+```{r echo=FALSE}
+best_r2 <- max(linear_comparison$R_squared)
+best_model_linear <- linear_comparison$Model[which.max(linear_comparison$R_squared)]
+```
+
+**Winner:** `r best_model_linear` (R² = `r round(best_r2, 3)`)
+
+### Visualization
+
+```{r}
+ggplot(linear_comparison, aes(x = Model, y = R_squared, fill = Model)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Linear Models: R² Comparison", y = "R²") +
+  theme_minimal() +
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.5))
+```
+
+## Part 2: Logistic Regression Models
+
+### Data Preparation
+
+```{r}
+heart <- read_csv("heart.csv")
+
+heart <- heart %>%
+  mutate(
+    target = as.factor(target),
+    sex = as.factor(sex),
+    cp = as.factor(cp),
+    fbs = as.factor(fbs),
+    restecg = as.factor(restecg),
+    exang = as.factor(exang),
+    slope = as.factor(slope),
+    ca = as.factor(ca),
+    thal = as.factor(thal)
+  )
+```
+
+### Model 1: Baseline (Intercept-only)
+
+```{r}
+model_baseline <- glm(target ~ 1, data = heart, family = binomial)
+pred_baseline <- predict(model_baseline, type = "response")
+class_baseline <- ifelse(pred_baseline > 0.5, "1", "0")
+auc_baseline <- auc(roc(heart$target, pred_baseline))
+conf_baseline <- confusionMatrix(as.factor(class_baseline), heart$target, positive = "1")
+```
+
+### Model 2: Clinical Model
+
+```{r}
+model_clinical <- glm(target ~ age + sex + cp + trestbps + chol + fbs + thalach,
+                      data = heart, family = binomial)
+pred_clinical <- predict(model_clinical, type = "response")
+class_clinical <- ifelse(pred_clinical > 0.5, "1", "0")
+auc_clinical <- auc(roc(heart$target, pred_clinical))
+conf_clinical <- confusionMatrix(as.factor(class_clinical), heart$target, positive = "1")
+```
+
+### Model 3: Full Model
+
+```{r}
+model_full <- glm(target ~ ., data = heart, family = binomial)
+pred_full <- predict(model_full, type = "response")
+class_full <- ifelse(pred_full > 0.5, "1", "0")
+auc_full <- auc(roc(heart$target, pred_full))
+conf_full <- confusionMatrix(as.factor(class_full), heart$target, positive = "1")
+```
+
+### Logistic Models Comparison
+
+```{r}
+logistic_comparison <- data.frame(
+  Model = c("Baseline", "Clinical", "Full"),
+  AIC = c(AIC(model_baseline), AIC(model_clinical), AIC(model_full)),
+  AUC = c(auc_baseline, auc_clinical, auc_full),
+  Accuracy = c(
+    conf_baseline$overall["Accuracy"],
+    conf_clinical$overall["Accuracy"],
+    conf_full$overall["Accuracy"]
+  ),
+  Sensitivity = c(
+    conf_baseline$byClass["Sensitivity"],
+    conf_clinical$byClass["Sensitivity"],
+    conf_full$byClass["Sensitivity"]
+  ),
+  Specificity = c(
+    conf_baseline$byClass["Specificity"],
+    conf_clinical$byClass["Specificity"],
+    conf_full$byClass["Specificity"]
+  )
+)
+
+logistic_comparison %>% knitr::kable(caption = "Logistic Models Performance", digits = 3)
+```
+
+```{r echo=FALSE}
+best_auc_log <- max(logistic_comparison$AUC)
+best_model_log <- logistic_comparison$Model[which.max(logistic_comparison$AUC)]
+```
+
+**Winner:** `r best_model_log` (AUC = `r round(best_auc_log, 3)`)
+
+### ROC Curves
+
+```{r}
+plot(roc(heart$target, pred_baseline), col = "gray", lwd = 2, main = "Logistic Models: ROC Comparison")
+lines(roc(heart$target, pred_clinical), col = "blue", lwd = 2)
+lines(roc(heart$target, pred_full), col = "red", lwd = 2)
+legend("bottomright",
+       legend = c("Baseline", "Clinical", "Full"),
+       col = c("gray", "blue", "red"), lwd = 2)
+```
+
+## Part 3: Regularized Regression
+
+### Data Preparation
+
+```{r}
+x <- model.matrix(target ~ ., data = heart)[, -1]
+y <- as.numeric(as.character(heart$target))
+```
+
+### Ridge Regression
+
+```{r}
+set.seed(123)
+cv_ridge <- cv.glmnet(x, y, family = "binomial", alpha = 0)
+model_ridge <- glmnet(x, y, family = "binomial", alpha = 0, lambda = cv_ridge$lambda.min)
+pred_ridge <- as.vector(predict(model_ridge, newx = x, type = "response"))
+auc_ridge <- auc(roc(y, pred_ridge))
+```
+
+### Lasso Regression
+
+```{r}
+set.seed(123)
+cv_lasso <- cv.glmnet(x, y, family = "binomial", alpha = 1)
+model_lasso <- glmnet(x, y, family = "binomial", alpha = 1, lambda = cv_lasso$lambda.min)
+pred_lasso <- as.vector(predict(model_lasso, newx = x, type = "response"))
+auc_lasso <- auc(roc(y, pred_lasso))
+```
+
+### Elastic Net
+
+```{r}
+set.seed(123)
+cv_elastic <- cv.glmnet(x, y, family = "binomial", alpha = 0.5)
+model_elastic <- glmnet(x, y, family = "binomial", alpha = 0.5, lambda = cv_elastic$lambda.min)
+pred_elastic <- as.vector(predict(model_elastic, newx = x, type = "response"))
+auc_elastic <- auc(roc(y, pred_elastic))
+```
+
+### Regularized Models Comparison
+
+```{r}
+regularized_comparison <- data.frame(
+  Model = c("Ridge", "Lasso", "Elastic Net"),
+  AUC = c(auc_ridge, auc_lasso, auc_elastic),
+  N_Predictors = c(
+    sum(coef(model_ridge) != 0) - 1,
+    sum(coef(model_lasso) != 0) - 1,
+    sum(coef(model_elastic) != 0) - 1
+  )
+)
+
+regularized_comparison %>% knitr::kable(caption = "Regularized Models Performance", digits = 4)
+```
+
+```{r echo=FALSE}
+best_auc_reg <- max(regularized_comparison$AUC)
+best_model_reg <- regularized_comparison$Model[which.max(regularized_comparison$AUC)]
+```
+
+**Winner:** `r best_model_reg` (AUC = `r round(best_auc_reg, 3)`)
+
+## Overall Comparison
+
+### Best Models Summary
+
+```{r}
+summary_table <- data.frame(
+  Task = c("Linear Regression", "Logistic Regression", "Regularized Regression"),
+  Best_Model = c(best_model_linear, best_model_log, best_model_reg),
+  Metric = c(
+    paste0("R² = ", round(best_r2, 3)),
+    paste0("AUC = ", round(best_auc_log, 3)),
+    paste0("AUC = ", round(best_auc_reg, 3))
+  )
+)
+
+summary_table %>% knitr::kable(caption = "Best Models Summary")
+```
+
+## Key Insights
+
+### Linear Regression (Insurance Data)
+
+**Multiple regression performed best** (R² = `r round(best_r2, 3)`), explaining 
+`r round(best_r2 * 100, 1)`% of variance in medical charges.
+
+**Key predictors:** Smoking status had the strongest effect (~$23,000 increase).
+
+**Polynomial terms** did not substantially improve performance, suggesting 
+linear relationships are adequate.
+
+### Logistic Regression (Heart Disease)
+
+**Full model achieved excellent performance** (AUC = `r round(best_auc_log, 3)`), 
+with `r round(best_auc_log * 100, 1)`% discriminative ability.
+
+**Sensitivity:** `r round(conf_full$byClass["Sensitivity"], 3)` 
+(detects `r round(conf_full$byClass["Sensitivity"] * 100, 1)`% of disease cases)
+
+**Improvement over baseline:** 
+AUC increased from `r round(auc_baseline, 3)` to `r round(best_auc_log, 3)`.
+
+### Regularization
+
+All three methods performed similarly (AUC ≈ 0.92), indicating:
+
+- Dataset is well-behaved
+- No severe multicollinearity
+- Moderate number of predictors
+
+**Regularization most useful** when dealing with high-dimensional data 
+(hundreds/thousands of predictors).
+
+## Recommendations
+
+### For Medical Charge Prediction
+
+**Use multiple linear regression** with key predictors (age, BMI, smoker, region).
+
+Provides good accuracy (R² = 0.75) with interpretable coefficients.
+
+### For Heart Disease Diagnosis
+
+**Use full logistic regression model** including all available diagnostic tests.
+
+Achieves 95% AUC with 92% sensitivity (few missed cases).
+
+**For screening:** Clinical model (AUC = 0.88) using basic measurements may suffice.
+
+### Methodology Best Practices
+
+**Model comparison should include:**
+
+- Multiple metrics (R², AIC, BIC for linear; AUC, sensitivity, specificity for logistic)
+- Visual comparisons (ROC curves, coefficient plots)
+- Consideration of complexity vs performance trade-off
+
+**Always validate on independent data** before clinical application.
+
+## Limitations
+
+**No train-test split:** All models evaluated on training data, potentially 
+overestimating performance.
+
+**Single datasets:** Results specific to insurance and heart disease data.
+
+**No external validation:** Required for clinical deployment.
+
+**Educational purpose:** These analyses demonstrate methodology, not clinical tools.
+
+## Conclusion
+
+This portfolio successfully demonstrates:
+
+✅ Linear regression techniques (simple, multiple, polynomial)
+
+✅ Logistic regression for binary classification
+
+✅ Regularization methods (Ridge, Lasso, Elastic Net)
+
+✅ Model comparison and evaluation
+
+✅ Professional reporting and interpretation
+
+**The progression from simple to complex models**, combined with proper 
+evaluation and comparison, provides a solid foundation for applied regression 
+analysis in medical and research contexts.
+
+**Future directions** include cross-validation, feature engineering, 
+and exploration of machine learning methods (random forests, neural networks).
